@@ -1,0 +1,3 @@
+module smarttube-windows/launcher
+
+go 1.24.7
