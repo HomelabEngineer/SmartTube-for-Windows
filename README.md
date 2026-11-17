@@ -1,6 +1,6 @@
 # SmartTube for Windows
 
-An installable Windows version of [SmartTube](https://github.com/yuliskov/SmartTube), the ad-free YouTube client for Android TV. Designed for Gamepad controller support prefect for Gaming Handhelds such as Asus ROG Xbox Ally X, Lenovo Legion Go, etc.
+An installable Windows version of [SmartTube](https://github.com/yuliskov/SmartTube), the ad-free YouTube client for Android TV.
 
 SmartTube itself isn't ported or modified. The launcher runs the official SmartTube **x86** APK (the build yuliskov publishes for x86 Android environments) inside Google's own Android Emulator with a stock Android TV image. That design is what keeps it current: **every time you open SmartTube, the launcher checks the SmartTube GitHub releases and installs anything newer before the app starts.** No rebuild of this installer is needed when SmartTube updates.
 
@@ -61,6 +61,7 @@ Backing out of SmartTube to the Android TV home screen closes everything (and sa
 | `audioOutput` | `scrcpy` | `scrcpy` captures Android's audio and plays it on Windows via [scrcpy](https://github.com/Genymobile/scrcpy) (downloaded automatically), bypassing the emulator's sound output, which can crackle. `emulator` uses the emulator's own sound device |
 | `scrcpyAudioBufferMs` | `200` | Audio buffer for `scrcpy` mode; raise it if there are still dropouts |
 | `smartTubeSettings` | prefer AVC (below) | SmartTube tickboxes to set once, automatically, through SmartTube's own menus. Each entry is a `path` (sidebar section, settings card, any sub-menus, then the tickbox label) and `checked` (`true`/`false`). Edit a path if SmartTube moves an option; `[]` turns this off |
+| `keepAwake` | `playing` | Keep Windows' screen from sleeping: `playing` (while a video plays), `always` (while SmartTube is open), `off` |
 | `debug` | `false` | Record detailed diagnostics (controller, focus, decoders, audio) in `launcher.log`, plus `emulator.log`, `scrcpy.log` and `smarttube-ui.xml` |
 
 Default `smartTubeSettings` (switches on *Settings → Player → Developer options → Codec selection: prefer avc over vp9*, which plays much more smoothly in the emulator):
