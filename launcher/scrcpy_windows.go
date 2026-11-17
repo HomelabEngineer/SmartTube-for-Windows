@@ -40,7 +40,7 @@ func ensureScrcpy() error {
 		if scrcpyAssetRe.MatchString(a.Name) {
 			zip := filepath.Join(dataDir, "downloads", a.Name)
 			logf("scrcpy: downloading %s", a.Name)
-			if err := download(a.URL, zip, "", "scrcpy", func(s string) { logf("%s", s) }); err != nil {
+			if err := download(a.URL, zip, "", "scrcpy", func(s string) { debugf("%s", s) }); err != nil {
 				return err
 			}
 			if err := unzipTop(zip, scrcpyDir(), nil); err != nil {
@@ -54,12 +54,17 @@ func ensureScrcpy() error {
 }
 
 // runScrcpyAudio keeps an audio-only scrcpy running until stop is closed.
-func runScrcpyAudio(serial string, bufferMs int, stop <-chan struct{}) {
+func runScrcpyAudio(serial string, bufferMs int, stop <-chan struct{}, stopping func() bool) {
 	if bufferMs <= 0 {
 		bufferMs = 120
 	}
 	logPath := filepath.Join(dataDir, "scrcpy.log")
-	lf, _ := os.Create(logPath)
+	var lf *os.File
+	if debugMode {
+		lf, _ = os.Create(logPath)
+	} else {
+		_ = os.Remove(logPath)
+	}
 	defer func() {
 		if lf != nil {
 			lf.Close()
@@ -88,7 +93,10 @@ func runScrcpyAudio(serial string, bufferMs int, stop <-chan struct{}) {
 			_ = cmd.Process.Kill()
 			return
 		case err := <-done:
-			logf("scrcpy: exited (%v); see scrcpy.log", err)
+			if stopping() {
+				return // SmartTube is closing; scrcpy exits with the emulator
+			}
+			logf("scrcpy: exited (%v); set \"debug\": true for scrcpy.log", err)
 		}
 		select {
 		case <-stop:

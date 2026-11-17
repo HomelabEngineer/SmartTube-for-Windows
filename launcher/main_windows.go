@@ -34,6 +34,38 @@ var (
 
 func itoa(i int) string { return strconv.Itoa(i) }
 
+// appendFile writes each Write to the end of path, opening and closing it.
+type appendFile string
+
+func (a appendFile) Write(p []byte) (int, error) {
+	f, err := os.OpenFile(string(a), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o644)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+	return f.Write(p)
+}
+
+// crlfWriter turns "\n" into "\r\n" for Windows tools.
+type crlfWriter struct{ w io.Writer }
+
+func (c crlfWriter) Write(p []byte) (int, error) {
+	if _, err := c.w.Write(bytes.ReplaceAll(bytes.ReplaceAll(p, []byte("\r\n"), []byte("\n")), []byte("\n"), []byte("\r\n"))); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+// debugMode is set from config.json "debug": detailed diagnostics only when on.
+var debugMode bool
+
+// debugf logs only in debug mode.
+func debugf(format string, a ...any) {
+	if debugMode {
+		logf(format, a...)
+	}
+}
+
 func logf(format string, a ...any) {
 	if logger != nil {
 		logger.Printf(format, a...)
@@ -49,6 +81,7 @@ func say(format string, a ...any) {
 }
 
 func main() {
+	detachStdHandles()
 	local := os.Getenv("LOCALAPPDATA")
 	if local == "" {
 		local, _ = os.UserConfigDir()
@@ -66,8 +99,11 @@ func main() {
 	} else {
 		_ = os.Rename(filepath.Join(dataDir, "launcher.log"), filepath.Join(dataDir, "launcher.prev.log"))
 	}
-	if lf, err := os.OpenFile(filepath.Join(dataDir, logName), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644); err == nil {
-		logger = log.New(lf, "", log.LstdFlags)
+	logPath := filepath.Join(dataDir, logName)
+	if err := os.WriteFile(logPath, []byte{0xEF, 0xBB, 0xBF}, 0o644); err == nil { // UTF-8 BOM
+		// Each line is appended with its own open/close: no long-lived handle
+		// that anything else could write through. CRLF for Notepad.
+		logger = log.New(crlfWriter{appendFile(logPath)}, "", log.LstdFlags)
 	} else {
 		logger = log.New(io.Discard, "", 0)
 	}
@@ -78,6 +114,7 @@ func main() {
 		arg = strings.ToLower(strings.TrimLeft(os.Args[1], "-/"))
 	}
 	cfg := loadConfig(dataDir)
+	debugMode = cfg.Debug
 	st := loadState(dataDir)
 
 	if arg == "purge" { // called by the uninstaller
@@ -113,7 +150,7 @@ func main() {
 		}
 		_ = os.RemoveAll(avdHome)
 		st.InstalledAPK, st.InstalledSHA, st.LastAPKCheck = "", "", 0
-		st.DefaultsDone, st.DefaultsAttempts = false, 0
+		st.SettingsApplied, st.SettingsKey, st.SettingsAttempts = "", "", 0
 		st.SetupComplete = false
 		saveState(dataDir, st)
 		ensureConsole("SmartTube setup")
@@ -340,6 +377,7 @@ func launch(cfg Config, st *State, forceUpdate bool) error {
 
 	// Window handling.
 	var emuPID atomic.Uint32
+	var closing atomic.Bool // set once SmartTube is being shut down
 	var emuHwnd atomic.Uintptr
 	var embedded atomic.Bool
 	// frontHwnd is the window that should own the foreground: the launcher's
@@ -369,13 +407,13 @@ func launch(cfg Config, st *State, forceUpdate bool) error {
 				emuPID.Store(w.pid)
 				emuHwnd.Store(w.hwnd)
 				if applied == 0 {
-					logf("focus: emulator window found; splash owns foreground=%v", splashOwnsForeground())
+					debugf("focus: emulator window found; splash owns foreground=%v", splashOwnsForeground())
 				}
 				if cfg.Embed && cfg.Fullscreen && !embedded.Load() && splashHost() != 0 {
 					hideEmulatorToolbar(w)
 					if embedInSplash(w.hwnd) {
 						embedded.Store(true)
-						logf("embed: SmartTube shown inside the launcher window (launcher foreground=%v)", splashOwnsForeground())
+						debugf("embed: SmartTube shown inside the launcher window (launcher foreground=%v)", splashOwnsForeground())
 					} else {
 						logf("embed: failed; falling back to a separate full-screen window")
 					}
@@ -393,14 +431,16 @@ func launch(cfg Config, st *State, forceUpdate bool) error {
 					}
 					makeFullscreen(w)
 					applied++
-					if applied >= 3 && !appStarted.Load() && splashHost() != 0 && time.Since(foundAt) < 150*time.Second {
+					// Keep the cover up through updates, downloads and the settings
+					// automation, until SmartTube is ready (10-minute safety limit).
+					if applied >= 3 && !appStarted.Load() && splashHost() != 0 && time.Since(foundAt) < 10*time.Minute {
 						applied = 2 // keep the cover up until SmartTube is launching
 					}
 					if applied >= 3 {
 						time.Sleep(700 * time.Millisecond) // let the last resize render
 						makeFullscreen(w)
 						revealWindow(w.hwnd)
-						logf("focus: revealed full-screen SmartTube window (foreground=%v)", isForeground(w.hwnd))
+						debugf("focus: revealed full-screen SmartTube window (foreground=%v)", isForeground(w.hwnd))
 						closeSplash()
 						break
 					}
@@ -435,7 +475,7 @@ func launch(cfg Config, st *State, forceUpdate bool) error {
 		if err := <-scrcpyReady; err != nil {
 			logf("scrcpy: unavailable, using the emulator's audio: %v", err)
 		} else {
-			go runScrcpyAudio(serial, cfg.ScrcpyAudioBufferMs, exited)
+			go runScrcpyAudio(serial, cfg.ScrcpyAudioBufferMs, exited, closing.Load)
 		}
 	}
 	dump, _ := adb(15*time.Second, "shell", "dumpsys", "package", pkg)
@@ -498,20 +538,22 @@ func launch(cfg Config, st *State, forceUpdate bool) error {
 
 	// Diagnostics: which video decoders Android has and whether the emulator's
 	// host-side (goldfish) decoders are switched on.
-	go func() {
-		o, _ := adb(10*time.Second, "shell", "getprop | grep -iE 'hwcodec|media|codec|gfxstream|goldfish' ; ls /vendor/etc /system/etc /odm/etc 2>/dev/null | grep -i media_codecs")
-		logf("codec props:\n%s", strings.TrimSpace(o))
-		o, _ = adb(10*time.Second, "shell", "cat /vendor/etc/media_codecs*.xml 2>/dev/null | grep -oE 'name=\"[^\"]+\"' | sort -u")
-		logf("codecs:\n%s", strings.TrimSpace(o))
-	}()
+	if debugMode {
+		go logCodecInfo(adb)
+	}
 
 	// Log which decoder each video actually uses (host-side "goldfish" vs
 	// software "c2.android"/"OMX.google" inside Android).
 	videoStarted := make(chan struct{}, 1)
-	go followDecoderLog(serial, exited, videoStarted)
-	// Audio diagnostics: Android's audio mixer state (sample rates, buffer
-	// sizes, underrun counts) 30 s and 90 s into the first video.
+	if debugMode {
+		go followDecoderLog(serial, exited, videoStarted)
+	}
+	// Audio diagnostics (debug): Android's audio mixer state (sample rates,
+	// buffer sizes, underrun counts) 30 s and 90 s into the first video.
 	go func() {
+		if !debugMode {
+			return
+		}
 		select {
 		case <-videoStarted:
 		case <-exited:
@@ -529,12 +571,25 @@ func launch(cfg Config, st *State, forceUpdate bool) error {
 	}()
 
 	out, err := adb(20*time.Second, "shell", "monkey", "-p", pkg, "-c", "android.intent.category.LEANBACK_LAUNCHER", "1")
-	logf("start app: %s %v", strings.TrimSpace(out), err)
-	if cfg.PreferAVC && !st.DefaultsDone && st.DefaultsAttempts < 2 {
-		splashText("Setting up SmartTube...")
-		st.DefaultsAttempts++
-		st.DefaultsDone = applySmartTubeDefaults(serial, pkg, freshInstall)
-		saveState(dataDir, *st)
+	if err != nil {
+		logf("start app failed: %s %v", strings.TrimSpace(out), err)
+	} else {
+		logf("SmartTube started")
+		debugf("start app: %s", strings.TrimSpace(out))
+	}
+	if key := settingsKey(cfg.SmartTubeSettings); len(cfg.SmartTubeSettings) > 0 && st.SettingsApplied != key {
+		if st.SettingsKey != key {
+			st.SettingsKey, st.SettingsAttempts = key, 0
+		}
+		if st.SettingsAttempts < 2 {
+			splashText("Setting up SmartTube...")
+			st.SettingsAttempts++
+			saveState(dataDir, *st)
+			if applySmartTubeSettings(serial, pkg, cfg.SmartTubeSettings, freshInstall) {
+				st.SettingsApplied = key
+			}
+			saveState(dataDir, *st)
+		}
 	}
 	appStarted.Store(true)
 	if splash != nil && !embedded.Load() {
@@ -548,7 +603,7 @@ func launch(cfg Config, st *State, forceUpdate bool) error {
 			if h := emuHwnd.Load(); h != 0 {
 				revealWindow(h)
 			}
-			logf("focus: closing splash at app start (SmartTube foreground=%v)", emuHwnd.Load() != 0 && isForeground(emuHwnd.Load()))
+			debugf("focus: closing splash at app start (SmartTube foreground=%v)", emuHwnd.Load() != 0 && isForeground(emuHwnd.Load()))
 			closeSplash()
 		}
 	}
@@ -559,7 +614,6 @@ func launch(cfg Config, st *State, forceUpdate bool) error {
 	defer close(stop)
 	// quit covers the screen with a black "Closing SmartTube..." screen and hides
 	// the Android window first, so the Android TV home screen is never seen.
-	var closing atomic.Bool
 	quit := func() {
 		if !closing.CompareAndSwap(false, true) {
 			return
@@ -596,7 +650,7 @@ func launch(cfg Config, st *State, forceUpdate bool) error {
 			return isForeground(h)
 		}
 		go runGamepad(allowed, sendKey, quit, refocus, stop)
-		logf("gamepad: ready")
+		debugf("gamepad: ready")
 		// Xbox full-screen mode: controller arrives as VK_GAMEPAD_* keystrokes.
 		hookLogged := 0
 		viewHeld, menuHeld := false, false
@@ -612,7 +666,7 @@ func launch(cfg Config, st *State, forceUpdate bool) error {
 			}
 			if hookLogged < 10 {
 				hookLogged++
-				logf("keyhook: gamepad vk 0x%02X down=%v", vk, down)
+				debugf("keyhook: gamepad vk 0x%02X down=%v", vk, down)
 			}
 			if viewHeld && menuHeld && down {
 				quit()
@@ -645,7 +699,7 @@ func launch(cfg Config, st *State, forceUpdate bool) error {
 					time.Sleep(150 * time.Millisecond)
 					how = "click"
 				}
-				logf("focus: front window was pid %d %s %q; took it back via %s (ok=%v)", pid, processName(pid), title, how, isForeground(h))
+				debugf("focus: front window was pid %d %s %q; took it back via %s (ok=%v)", pid, processName(pid), title, how, isForeground(h))
 			}
 		}
 	}()
@@ -749,6 +803,14 @@ func followResumedActivities(serial string, out chan<- string, stop <-chan struc
 	}
 }
 
+// logCodecInfo (debug) records Android's video decoders and codec properties.
+func logCodecInfo(adb func(time.Duration, ...string) (string, error)) {
+	o, _ := adb(10*time.Second, "shell", "getprop | grep -iE 'hwcodec|media|codec|gfxstream|goldfish' ; ls /vendor/etc /system/etc /odm/etc 2>/dev/null | grep -i media_codecs")
+	logf("codec props:\n%s", strings.TrimSpace(o))
+	o, _ = adb(10*time.Second, "shell", "cat /vendor/etc/media_codecs*.xml 2>/dev/null | grep -oE 'name=\"[^\"]+\"' | sort -u")
+	logf("codecs:\n%s", strings.TrimSpace(o))
+}
+
 func followDecoderLog(serial string, stop <-chan struct{}, videoStarted chan<- struct{}) {
 	cmd := exec.Command(adbExe(), "-s", serial, "shell", "logcat", "-v", "brief", "-T", "1",
 		"CCodec:I", "MediaCodec:I", "ACodec:I", "Codec2Client:I", "*:S")
@@ -785,7 +847,7 @@ func followDecoderLog(serial string, stop <-chan struct{}, videoStarted chan<- s
 func applyVideoDecoding(cfg Config, serial, pkg string) {
 	o, _ := runHidden(10*time.Second, adbExe(), "-s", serial, "shell", "getprop", "ro.boot.qemu.hwcodec.avcdec")
 	v := strings.TrimSpace(o)
-	logf("video decoding: configured %q; host decoder property avcdec=%q (2 = Windows side, empty/0 = inside Android)", cfg.VideoDecoding, v)
+	debugf("video decoding: configured %q; host decoder property avcdec=%q (2 = Windows side, empty/0 = inside Android)", cfg.VideoDecoding, v)
 }
 
 func startEmulator(cfg Config, port int, withNoMetrics bool) (*os.Process, <-chan struct{}, error) {
@@ -805,13 +867,15 @@ func startEmulator(cfg Config, port int, withNoMetrics bool) (*os.Process, <-cha
 	cmd.Env = os.Environ()
 	for k, v := range emulatorEnv(cfg) {
 		cmd.Env = append(cmd.Env, k+"="+v)
-		logf("emulator env %s=%s", k, v)
+		debugf("emulator env %s=%s", k, v)
 	}
 	cmd.SysProcAttr = noConsoleProcAttr() // no console, but the emulator window must stay visible
 	out := &lockedBuffer{}
 	cmd.Stdout, cmd.Stderr = out, out
 	// Full emulator output goes to emulator.log (launcher.log keeps only the tail).
-	if ef, err := os.Create(filepath.Join(dataDir, "emulator.log")); err == nil {
+	if !debugMode {
+		_ = os.Remove(filepath.Join(dataDir, "emulator.log"))
+	} else if ef, err := os.Create(filepath.Join(dataDir, "emulator.log")); err == nil {
 		w := io.MultiWriter(out, ef)
 		cmd.Stdout, cmd.Stderr = w, w
 	}
@@ -822,7 +886,7 @@ func startEmulator(cfg Config, port int, withNoMetrics bool) (*os.Process, <-cha
 	exited := make(chan struct{})
 	go func() {
 		_ = cmd.Wait()
-		logf("emulator output (tail): %s", tail(out.String(), 3000))
+		debugf("emulator output (tail): %s", tail(out.String(), 3000))
 		close(exited)
 	}()
 	// If the emulator dies right away, report it (and retry without newer-only flags).
@@ -906,7 +970,7 @@ func fetchLatestAPK(cfg Config, st *State, force bool) (string, string, string, 
 	}
 	dest := filepath.Join(cacheDir, cand.Name)
 	if _, err := os.Stat(dest); err != nil || cand.Version == "" {
-		if err := download(cand.URL, dest, "", "SmartTube "+cand.Version, func(s string) { logf("%s", s) }); err != nil {
+		if err := download(cand.URL, dest, "", "SmartTube "+cand.Version, func(s string) { debugf("%s", s) }); err != nil {
 			return "", "", "", "", err
 		}
 	}

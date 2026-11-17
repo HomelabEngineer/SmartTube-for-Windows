@@ -144,7 +144,7 @@ func keySender(port int, serial string, method string, focused func() bool) func
 			c.Close()
 		}
 	}
-	logf("input: method=%s (configured %q)", mode, method)
+	debugf("input: method=%s (configured %q)", mode, method)
 
 	// Media/search keys via adb, in order, off the polling thread.
 	adbQ := make(chan int, 32)
@@ -160,7 +160,7 @@ func keySender(port int, serial string, method string, focused func() bool) func
 	return func(k tvKey, down bool) {
 		if logged < 6 {
 			logged++
-			logf("input: %s key %d down=%v", mode, k.linux, down)
+			debugf("input: %s key %d down=%v", mode, k.linux, down)
 		}
 		if mode == "console" && con != nil {
 			if err := con.key(k.linux, down); err == nil {

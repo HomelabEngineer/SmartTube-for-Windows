@@ -44,7 +44,7 @@ type gameInput struct{ obj uintptr }
 func loadGameInput() *gameInput {
 	dll := syscall.NewLazyDLL("GameInput.dll")
 	if err := dll.Load(); err != nil {
-		logf("gameinput: not available (%v)", err)
+		debugf("gameinput: not available (%v)", err)
 		return nil
 	}
 	create := dll.NewProc("GameInputCreate")
@@ -58,7 +58,7 @@ func loadGameInput() *gameInput {
 		logf("gameinput: GameInputCreate failed hr=0x%08x", uint32(hr))
 		return nil
 	}
-	logf("gameinput: ready")
+	debugf("gameinput: ready")
 	return &gameInput{obj: obj}
 }
 

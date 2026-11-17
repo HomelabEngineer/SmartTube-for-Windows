@@ -38,12 +38,16 @@ type Config struct {
 	EmulatorPriority string `json:"emulatorPriority"` // normal, above, high
 	// Audio output: "emulator" (the emulator's own sound device) or "scrcpy"
 	// (capture Android's audio and play it on Windows, bypassing the emulator).
-	AudioOutput         string `json:"audioOutput"`
-	PreferAVC           bool   `json:"preferAvc"` // switch on SmartTube's "prefer AVC over VP9" once, automatically
-	ScrcpyAudioBufferMs int    `json:"scrcpyAudioBufferMs"`
-	GitHubRepo          string `json:"githubRepo"`     // where SmartTube releases are published
-	ConsolePort         int    `json:"consolePort"`    // emulator console port (even number 5554-5584)
-	BootTimeoutSec      int    `json:"bootTimeoutSec"` //
+	AudioOutput string `json:"audioOutput"`
+	// SmartTube settings to apply once through SmartTube's own menus. Path is
+	// the sidebar section, the settings card, any sub-menus, then the tickbox
+	// label. Edit the path if SmartTube moves an option; [] disables this.
+	SmartTubeSettings   []SmartTubeSetting `json:"smartTubeSettings"`
+	Debug               bool               `json:"debug"` // detailed diagnostics in launcher.log plus emulator.log, scrcpy.log, smarttube-ui.xml
+	ScrcpyAudioBufferMs int                `json:"scrcpyAudioBufferMs"`
+	GitHubRepo          string             `json:"githubRepo"`     // where SmartTube releases are published
+	ConsolePort         int                `json:"consolePort"`    // emulator console port (even number 5554-5584)
+	BootTimeoutSec      int                `json:"bootTimeoutSec"` //
 }
 
 func defaultConfig() Config {
@@ -69,9 +73,13 @@ func defaultConfig() Config {
 		VideoDecoding:       "host",
 		AudioOutput:         "scrcpy",
 		ScrcpyAudioBufferMs: 200,
-		PreferAVC:           true,
 		EmulatorPriority:    "normal",
-		EmulatorEnv:         map[string]string{},
+		SmartTubeSettings: []SmartTubeSetting{{
+			Path:    []string{"Settings", "Player", "Developer options", "Codec selection: prefer avc over vp9"},
+			OpensTo: "Video presets",
+			Checked: true,
+		}},
+		EmulatorEnv: map[string]string{},
 	}
 }
 
@@ -118,6 +126,23 @@ func loadConfig(dir string) Config {
 	return c
 }
 
+// SmartTubeSetting is a tickbox in SmartTube's settings, reached by Path.
+type SmartTubeSetting struct {
+	Path    []string `json:"path"`
+	OpensTo string   `json:"opensTo"` // a label shown once the card's menu has opened (its first entry)
+	Checked bool     `json:"checked"`
+}
+
+// settingsAutomationVersion is bumped when the automation itself improves, so
+// settings that failed with an older launcher are tried again.
+const settingsAutomationVersion = "v5:"
+
+// settingsKey identifies a settings list, so a changed list is applied again.
+func settingsKey(list []SmartTubeSetting) string {
+	b, _ := json.Marshal(list)
+	return settingsAutomationVersion + string(b)
+}
+
 // emulatorEnv returns the environment variables passed to the emulator.
 // The emulator's audio is QEMU's: on Windows it plays through DirectSound
 // ("dsound") or waveOut ("winwave"), both tuned with QEMU_* variables.
@@ -152,15 +177,16 @@ func emulatorEnv(c Config) map[string]string {
 
 // State is launcher bookkeeping (not meant to be edited).
 type State struct {
-	SystemImage      string `json:"systemImage"`                 // e.g. system-images;android-34;android-tv;x86
-	ImageABI         string `json:"imageAbi"`                    // x86 / x86_64
-	EmulatorRev      string `json:"emulatorRev"`                 //
-	InstalledAPK     string `json:"installedApk"`                // asset name of the last APK installed
-	InstalledSHA     string `json:"installedSha"`                // sha256 of the last APK installed
-	LastAPKCheck     int64  `json:"lastApkCheck"`                // unix seconds
-	SetupComplete    bool   `json:"setupComplete"`               //
-	DefaultsDone     bool   `json:"smartTubeDefaultsDoneV3"`     // SmartTube settings applied via UI automation
-	DefaultsAttempts int    `json:"smartTubeDefaultsAttemptsV3"` //
+	SystemImage      string `json:"systemImage"`               // e.g. system-images;android-34;android-tv;x86
+	ImageABI         string `json:"imageAbi"`                  // x86 / x86_64
+	EmulatorRev      string `json:"emulatorRev"`               //
+	InstalledAPK     string `json:"installedApk"`              // asset name of the last APK installed
+	InstalledSHA     string `json:"installedSha"`              // sha256 of the last APK installed
+	LastAPKCheck     int64  `json:"lastApkCheck"`              // unix seconds
+	SetupComplete    bool   `json:"setupComplete"`             //
+	SettingsApplied  string `json:"smartTubeSettingsApplied"`  // key of the settings list last applied
+	SettingsKey      string `json:"smartTubeSettingsKey"`      // key of the list being attempted
+	SettingsAttempts int    `json:"smartTubeSettingsAttempts"` // attempts for SettingsKey
 }
 
 func loadState(dir string) State {

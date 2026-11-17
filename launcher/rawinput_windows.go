@@ -90,7 +90,7 @@ func startRawInput() *rawInputReader {
 			ready <- false
 			return
 		}
-		logf("rawinput: ready")
+		debugf("rawinput: ready")
 		ready <- true
 		var msg [48]byte
 		for {
@@ -146,7 +146,7 @@ func (r *rawInputReader) handle(lparam uintptr) {
 	st := r.parse(dev, report)
 	if st != dev.state && r.logged < 8 && st.buttons != 0 {
 		r.logged++
-		logf("rawinput: buttons=%04x lx=%d ly=%d", st.buttons, st.lx, st.ly)
+		debugf("rawinput: buttons=%04x lx=%d ly=%d", st.buttons, st.lx, st.ly)
 	}
 	dev.state = st
 }
@@ -172,7 +172,7 @@ func (r *rawInputReader) openDevice(h uintptr) *rawDevice {
 			dev.ranges[u] = [2]int32{lo, hi}
 		}
 	}
-	logf("rawinput: new HID controller (ranges %v)", dev.ranges)
+	debugf("rawinput: new HID controller (ranges %v)", dev.ranges)
 	return dev
 }
 
