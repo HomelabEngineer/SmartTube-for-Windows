@@ -150,3 +150,17 @@ func parseResumedLine(line string) string {
 	}
 	return ""
 }
+
+// sessionPlaying reports whether pkg's media session is PLAYING in
+// `dumpsys media_session` output (sessions are listed one after another,
+// each with a "package=" line).
+func sessionPlaying(dump, pkg string) bool {
+	parts := strings.Split(dump, "package=")
+	for _, p := range parts[1:] {
+		if strings.HasPrefix(p, pkg) &&
+			(strings.Contains(p, "state=PLAYING") || strings.Contains(p, "PlaybackState {state=3,")) {
+			return true
+		}
+	}
+	return false
+}
