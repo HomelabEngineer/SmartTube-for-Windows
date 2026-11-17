@@ -43,7 +43,8 @@ type Config struct {
 	// the sidebar section, the settings card, any sub-menus, then the tickbox
 	// label. Edit the path if SmartTube moves an option; [] disables this.
 	SmartTubeSettings   []SmartTubeSetting `json:"smartTubeSettings"`
-	Debug               bool               `json:"debug"` // detailed diagnostics in launcher.log plus emulator.log, scrcpy.log, smarttube-ui.xml
+	KeepAwake           string             `json:"keepAwake"` // keep Windows' screen on: "playing" (while a video plays), "always", "off"
+	Debug               bool               `json:"debug"`     // detailed diagnostics in launcher.log plus emulator.log, scrcpy.log, smarttube-ui.xml
 	ScrcpyAudioBufferMs int                `json:"scrcpyAudioBufferMs"`
 	GitHubRepo          string             `json:"githubRepo"`     // where SmartTube releases are published
 	ConsolePort         int                `json:"consolePort"`    // emulator console port (even number 5554-5584)
@@ -74,6 +75,7 @@ func defaultConfig() Config {
 		AudioOutput:         "scrcpy",
 		ScrcpyAudioBufferMs: 200,
 		EmulatorPriority:    "normal",
+		KeepAwake:           "playing",
 		SmartTubeSettings: []SmartTubeSetting{{
 			Path:    []string{"Settings", "Player", "Developer options", "Codec selection: prefer avc over vp9"},
 			OpensTo: "Video presets",
@@ -113,6 +115,9 @@ func loadConfig(dir string) Config {
 	}
 	if c.InputMethod != "console" && c.InputMethod != "keyboard" {
 		c.InputMethod = "auto"
+	}
+	if c.KeepAwake != "always" && c.KeepAwake != "off" {
+		c.KeepAwake = "playing"
 	}
 	if c.AudioOutput != "emulator" {
 		c.AudioOutput = "scrcpy"

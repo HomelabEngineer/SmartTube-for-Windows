@@ -211,7 +211,7 @@ func TestUINodesMultiline(t *testing.T) {
 func TestDefaults(t *testing.T) {
 	c := defaultConfig()
 	if c.AudioOutput != "scrcpy" || c.ScrcpyAudioBufferMs != 200 || c.Cores != 2 || c.VideoDecoding != "host" ||
-		c.EmulatorPriority != "normal" || c.Debug || c.AudioLatencyMs != 60 {
+		c.EmulatorPriority != "normal" || c.Debug || c.KeepAwake != "playing" || c.AudioLatencyMs != 60 {
 		t.Fatalf("defaults: %+v", c)
 	}
 	if len(c.SmartTubeSettings) != 1 || !c.SmartTubeSettings[0].Checked ||
@@ -257,5 +257,26 @@ func TestCheckStateFromImage(t *testing.T) {
 	}
 	if c, ok := checkStateFromImage(mk(true), row, text); !ok || !c {
 		t.Fatal("ticked box read as", c, ok)
+	}
+}
+
+func TestSessionPlaying(t *testing.T) {
+	d := `Media button session is org.smarttube.stable/MediaSessionCompat (userId=0)
+  Sessions Stack - have 2 sessions:
+    other (userId=0)
+      package=com.android.tv.settings
+      state=PlaybackState {state=PLAYING(3), position=0}
+    MediaSessionCompat (userId=0)
+      package=org.smarttube.stable
+      active=true
+      state=PlaybackState {state=PAUSED(2), position=1000}`
+	if sessionPlaying(d, "org.smarttube.stable") {
+		t.Fatal("paused read as playing")
+	}
+	if !sessionPlaying(strings.Replace(d, "PAUSED(2)", "PLAYING(3)", 1), "org.smarttube.stable") {
+		t.Fatal("playing not detected")
+	}
+	if !sessionPlaying("package=org.smarttube.stable\n state=PlaybackState {state=3, position=5}", "org.smarttube.stable") {
+		t.Fatal("old format")
 	}
 }

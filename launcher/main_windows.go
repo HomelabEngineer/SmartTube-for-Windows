@@ -591,6 +591,7 @@ func launch(cfg Config, st *State, forceUpdate bool) error {
 			saveState(dataDir, *st)
 		}
 	}
+	go keepAwake(serial, pkg, cfg.KeepAwake, exited)
 	appStarted.Store(true)
 	if splash != nil && !embedded.Load() {
 		if cfg.Fullscreen && emuHwnd.Load() != 0 {

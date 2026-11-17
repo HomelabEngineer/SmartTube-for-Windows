@@ -61,6 +61,7 @@ Backing out of SmartTube to the Android TV home screen closes everything (and sa
 | `audioOutput` | `scrcpy` | `scrcpy` captures Android's audio and plays it on Windows via [scrcpy](https://github.com/Genymobile/scrcpy) (downloaded automatically), bypassing the emulator's sound output, which can crackle. `emulator` uses the emulator's own sound device |
 | `scrcpyAudioBufferMs` | `200` | Audio buffer for `scrcpy` mode; raise it if there are still dropouts |
 | `smartTubeSettings` | prefer AVC (below) | SmartTube tickboxes to set once, automatically, through SmartTube's own menus. Each entry is a `path` (sidebar section, settings card, any sub-menus, then the tickbox label) and `checked` (`true`/`false`). Edit a path if SmartTube moves an option; `[]` turns this off |
+| `keepAwake` | `playing` | Keep Windows' screen from sleeping: `playing` (while a video plays), `always` (while SmartTube is open), `off` |
 | `debug` | `false` | Record detailed diagnostics (controller, focus, decoders, audio) in `launcher.log`, plus `emulator.log`, `scrcpy.log` and `smarttube-ui.xml` |
 
 Default `smartTubeSettings` (switches on *Settings → Player → Developer options → Codec selection: prefer avc over vp9*, which plays much more smoothly in the emulator):
