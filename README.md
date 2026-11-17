@@ -1,6 +1,6 @@
 # SmartTube for Windows
 
-An installable Windows version of [SmartTube](https://github.com/yuliskov/SmartTube), the ad-free YouTube client for Android TV.
+An installable Windows version of [SmartTube](https://github.com/yuliskov/SmartTube), the ad-free YouTube client for Android TV. Designed for Gamepad controller support prefect for Gaming Handhelds such as Asus ROG Xbox Ally X, Lenovo Legion Go, etc.
 
 SmartTube itself isn't ported or modified. The launcher runs the official SmartTube **x86** APK (the build yuliskov publishes for x86 Android environments) inside Google's own Android Emulator with a stock Android TV image. That design is what keeps it current: **every time you open SmartTube, the launcher checks the SmartTube GitHub releases and installs anything newer before the app starts.** No rebuild of this installer is needed when SmartTube updates.
 
