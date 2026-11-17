@@ -71,7 +71,7 @@ func installKeyHook(handle func(vk uint32, down bool) bool) {
 			logf("keyhook: SetWindowsHookEx failed: %v", err)
 			return
 		}
-		logf("keyhook: installed")
+		debugf("keyhook: installed")
 		var msg [48]byte
 		for {
 			r, _, _ := procGetMessageW.Call(uintptr(unsafe.Pointer(&msg[0])), 0, 0, 0)

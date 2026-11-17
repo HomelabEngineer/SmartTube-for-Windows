@@ -5,6 +5,7 @@ package main
 import (
 	"os"
 	"strings"
+	"sync"
 	"syscall"
 	"unsafe"
 )
@@ -127,9 +128,12 @@ type winInfo struct {
 	w, h  int32
 }
 
-func listWindows() []winInfo {
-	var out []winInfo
-	cb := syscall.NewCallback(func(hwnd, _ uintptr) uintptr {
+// One EnumWindows callback for the whole process: Go can only create about
+// 2000 callbacks, so making one per call would eventually crash the launcher.
+var (
+	enumMu  sync.Mutex
+	enumOut []winInfo
+	enumCB  = syscall.NewCallback(func(hwnd, _ uintptr) uintptr {
 		vis, _, _ := procIsWindowVisible.Call(hwnd)
 		if vis == 0 {
 			return 1
@@ -140,11 +144,35 @@ func listWindows() []winInfo {
 		procGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), 256)
 		var r [4]int32
 		procGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&r[0])))
-		out = append(out, winInfo{hwnd, pid, syscall.UTF16ToString(buf), r[2] - r[0], r[3] - r[1]})
+		enumOut = append(enumOut, winInfo{hwnd, pid, syscall.UTF16ToString(buf), r[2] - r[0], r[3] - r[1]})
 		return 1
 	})
-	procEnumWindows.Call(cb, 0)
+)
+
+func listWindows() []winInfo {
+	enumMu.Lock()
+	defer enumMu.Unlock()
+	enumOut = nil
+	procEnumWindows.Call(enumCB, 0)
+	out := enumOut
+	enumOut = nil
 	return out
+}
+
+var procSetStdHandle = kernel32.NewProc("SetStdHandle")
+
+// detachStdHandles points stdout/stderr at NUL. A GUI program can be started
+// (by Playnite, the Start menu...) with standard handles that aren't valid in
+// this process; Windows may later give the same handle number to our log
+// file, and anything written to "stdout" then lands in the log as garbage.
+func detachStdHandles() {
+	nul, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		return
+	}
+	procSetStdHandle.Call(^uintptr(10), nul.Fd()) // STD_OUTPUT_HANDLE (-11)
+	procSetStdHandle.Call(^uintptr(11), nul.Fd()) // STD_ERROR_HANDLE (-12)
+	os.Stdout, os.Stderr = nul, nul
 }
 
 // findEmulatorWindow locates the emulator's main window ("Android Emulator - SmartTube:5554").
@@ -242,7 +270,7 @@ var (
 // child processes (the emulator), while we still have it from our launcher.
 func allowAnyForeground() {
 	r, _, err := procAllowSetForegroundWindow.Call(^uintptr(0)) // ASFW_ANY
-	logf("focus: AllowSetForegroundWindow(ASFW_ANY)=%d %v", r, err)
+	debugf("focus: AllowSetForegroundWindow(ASFW_ANY)=%d %v", r, err)
 }
 
 type mouseInput struct {
@@ -383,5 +411,5 @@ func setProcessPriority(pid uint32, level string) {
 	}
 	defer procCloseHandle.Call(h)
 	r, _, err := procSetPriorityClass.Call(h, class)
-	logf("priority: emulator (%s) set to %s: ok=%v %v", processName(pid), level, r != 0, err)
+	debugf("priority: emulator (%s) set to %s: ok=%v %v", processName(pid), level, r != 0, err)
 }

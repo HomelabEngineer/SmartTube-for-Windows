@@ -2,6 +2,7 @@ package main
 
 import (
 	"html"
+	"image"
 	"regexp"
 	"strconv"
 	"strings"
@@ -94,6 +95,27 @@ func checkStateNear(nodes []uiNode, n uiNode) (checked, ok bool) {
 	return false, false
 }
 
+// focusedTop returns the top edge of the focused view (-1 if none).
+func focusedTop(nodes []uiNode) int {
+	top := -1
+	for _, n := range nodes {
+		if n.Focused && (top < 0 || n.Y1 < top) {
+			top = n.Y1
+		}
+	}
+	return top
+}
+
+// anyFocused reports whether some view has focus.
+func anyFocused(nodes []uiNode) bool {
+	for _, n := range nodes {
+		if n.Focused {
+			return true
+		}
+	}
+	return false
+}
+
 // focusedOn reports whether the focused view contains the node with text t.
 func focusedOn(nodes []uiNode, t string) bool {
 	n, ok := findText(nodes, t)
@@ -110,4 +132,66 @@ func focusedOn(nodes []uiNode, t string) bool {
 		}
 	}
 	return false
+}
+
+// focusedRow returns the focused view that contains the node labelled t.
+func focusedRow(nodes []uiNode, t string) (row, text uiNode, ok bool) {
+	text, ok = findText(nodes, t)
+	if !ok {
+		return
+	}
+	x, y := text.center()
+	for _, f := range nodes {
+		if f.Focused && x >= f.X1 && x <= f.X2 && y >= f.Y1 && y <= f.Y2 {
+			return f, text, true
+		}
+	}
+	return uiNode{}, text, false
+}
+
+// checkStateFromImage reads a tickbox from a screenshot when uiautomator
+// can't report it. The box sits in the row to the left of the label: find its
+// left and right edges along the row's middle line, then compare the inside
+// with the background just outside the box. An empty box's inside matches the
+// background; a ticked box's inside is filled or crossed by the tick.
+func checkStateFromImage(img image.Image, row, text uiNode) (checked, ok bool) {
+	lum := func(x, y int) int {
+		r, g, b, _ := img.At(x, y).RGBA()
+		return int((299*r + 587*g + 114*b) / 1000 >> 8)
+	}
+	b := img.Bounds()
+	cy := (row.Y1 + row.Y2) / 2
+	if cy < b.Min.Y || cy >= b.Max.Y {
+		return false, false
+	}
+	x0, x1 := max(row.X1, b.Min.X), min(text.X1, b.Max.X)
+	bg := lum(x0+2, cy)
+	left, right := -1, -1
+	for x := x0; x < x1; x++ {
+		if d := lum(x, cy) - bg; d > 60 || d < -60 {
+			if left < 0 {
+				left = x
+			}
+			right = x
+		}
+	}
+	if left < 0 || right-left < 12 {
+		return false, false // no box found
+	}
+	// Edges of an outline are a few pixels thick; look inside them.
+	w := right - left
+	in0, in1 := left+w/4, right-w/4
+	marked, total := 0, 0
+	for y := cy - w/4; y <= cy+w/4; y++ {
+		for x := in0; x <= in1; x++ {
+			total++
+			if d := lum(x, y) - bg; d > 50 || d < -50 {
+				marked++
+			}
+		}
+	}
+	if total == 0 {
+		return false, false
+	}
+	return marked*100/total > 15, true
 }

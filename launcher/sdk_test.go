@@ -2,8 +2,11 @@ package main
 
 import (
 	"archive/zip"
+	"image"
+	"image/color"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -202,5 +205,57 @@ func TestUINodesMultiline(t *testing.T) {
 	}
 	if c, k := checkStateNear(nodes, n); !k || c {
 		t.Fatal("state", c, k)
+	}
+}
+
+func TestDefaults(t *testing.T) {
+	c := defaultConfig()
+	if c.AudioOutput != "scrcpy" || c.ScrcpyAudioBufferMs != 200 || c.Cores != 2 || c.VideoDecoding != "host" ||
+		c.EmulatorPriority != "normal" || c.Debug || c.AudioLatencyMs != 60 {
+		t.Fatalf("defaults: %+v", c)
+	}
+	if len(c.SmartTubeSettings) != 1 || !c.SmartTubeSettings[0].Checked ||
+		strings.Join(c.SmartTubeSettings[0].Path, "|") != "Settings|Player|Developer options|Codec selection: prefer avc over vp9" {
+		t.Fatalf("settings: %+v", c.SmartTubeSettings)
+	}
+	// An existing config.json without the new keys keeps the defaults.
+	d := t.TempDir()
+	os.WriteFile(filepath.Join(d, "config.json"), []byte(`{"cores": 4, "preferAvc": true}`), 0o644)
+	l := loadConfig(d)
+	if l.Cores != 4 || l.AudioOutput != "scrcpy" || len(l.SmartTubeSettings) != 1 {
+		t.Fatalf("load: %+v", l)
+	}
+	b, _ := os.ReadFile(filepath.Join(d, "config.json"))
+	if !strings.Contains(string(b), `"smartTubeSettings"`) || !strings.Contains(string(b), `"debug": false`) {
+		t.Fatalf("rewritten config: %s", b)
+	}
+}
+
+func TestCheckStateFromImage(t *testing.T) {
+	// Grey focused row with a 40px white-outline box at x=1100..1140.
+	mk := func(filled bool) image.Image {
+		img := image.NewRGBA(image.Rect(0, 0, 1920, 1080))
+		for y := 880; y < 1010; y++ {
+			for x := 1050; x < 1950; x++ {
+				img.Set(x, y, color.RGBA{100, 100, 105, 255})
+			}
+		}
+		for y := 925; y < 965; y++ {
+			for x := 1100; x < 1140; x++ {
+				edge := x < 1104 || x >= 1136 || y < 929 || y >= 961
+				if edge || filled {
+					img.Set(x, y, color.RGBA{240, 240, 240, 255})
+				}
+			}
+		}
+		return img
+	}
+	row := uiNode{X1: 1050, Y1: 880, X2: 1950, Y2: 1010}
+	text := uiNode{X1: 1200, Y1: 900, X2: 1900, Y2: 990}
+	if c, ok := checkStateFromImage(mk(false), row, text); !ok || c {
+		t.Fatal("empty box read as", c, ok)
+	}
+	if c, ok := checkStateFromImage(mk(true), row, text); !ok || !c {
+		t.Fatal("ticked box read as", c, ok)
 	}
 }

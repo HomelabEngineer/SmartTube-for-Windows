@@ -177,7 +177,7 @@ func showSplash(text string) {
 		}
 		s.hwnd = hwnd
 		procSetForegroundWindow.Call(hwnd)
-		logf("splash: shown (foreground=%v)", isForeground(hwnd))
+		debugf("splash: shown (foreground=%v)", isForeground(hwnd))
 		close(ready)
 		var msg [48]byte
 		for {

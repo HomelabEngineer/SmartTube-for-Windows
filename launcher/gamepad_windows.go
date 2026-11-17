@@ -59,7 +59,7 @@ func loadXInput() *syscall.LazyProc {
 		if d.Load() == nil {
 			p := d.NewProc("XInputGetState")
 			if p.Find() == nil {
-				logf("gamepad: using %s", dll)
+				debugf("gamepad: using %s", dll)
 				return p
 			}
 		}
@@ -103,7 +103,7 @@ func runGamepad(allowed func() bool, send func(k tvKey, down bool), quit func(),
 			r, _, _ := get.Call(i, uintptr(unsafe.Pointer(&s)))
 			if (r == 0) != connected[i] {
 				connected[i] = r == 0
-				logf("gamepad: controller %d connected=%v", i, connected[i])
+				debugf("gamepad: controller %d connected=%v", i, connected[i])
 			}
 			if r != 0 {
 				continue
@@ -112,7 +112,7 @@ func runGamepad(allowed func() bool, send func(k tvKey, down bool), quit func(),
 				lastPacket[i] = s.packet
 				if rawLogged < 15 {
 					rawLogged++
-					logf("gamepad: raw slot %d packet=%d buttons=%04x lt=%d rt=%d lx=%d ly=%d", i, s.packet, s.buttons, s.lt, s.rt, s.lx, s.ly)
+					debugf("gamepad: raw slot %d packet=%d buttons=%04x lt=%d rt=%d lx=%d ly=%d", i, s.packet, s.buttons, s.lt, s.rt, s.lx, s.ly)
 				}
 			}
 			states = append(states, s)
@@ -121,7 +121,7 @@ func runGamepad(allowed func() bool, send func(k tvKey, down bool), quit func(),
 			if s, ok := gi.read(); ok {
 				if s.buttons != 0 && giLogged < 5 {
 					giLogged++
-					logf("gameinput: buttons=%04x lt=%d rt=%d lx=%d ly=%d", s.buttons, s.lt, s.rt, s.lx, s.ly)
+					debugf("gameinput: buttons=%04x lt=%d rt=%d lx=%d ly=%d", s.buttons, s.lt, s.rt, s.lx, s.ly)
 				}
 				states = append(states, s)
 			}
@@ -166,7 +166,7 @@ func runGamepad(allowed func() bool, send func(k tvKey, down bool), quit func(),
 			ok := refocus != nil && refocus()
 			if time.Since(lastFocusLog) > 5*time.Second {
 				lastFocusLog = time.Now()
-				logf("gamepad: SmartTube not focused (focused: pid %d %q); refocus ok=%v", pid, title, ok)
+				debugf("gamepad: SmartTube not focused (focused: pid %d %q); refocus ok=%v", pid, title, ok)
 			}
 			for k := range want {
 				held[k] = true // swallow this press; its release is sent harmlessly later
@@ -175,7 +175,7 @@ func runGamepad(allowed func() bool, send func(k tvKey, down bool), quit func(),
 		}
 		if len(want) > 0 && pressesLogged < 3 {
 			pressesLogged++
-			logf("gamepad: press %v", want)
+			debugf("gamepad: press %v", want)
 		}
 		for k := range held {
 			if !want[k] {
